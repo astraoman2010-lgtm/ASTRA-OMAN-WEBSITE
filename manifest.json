@@ -1,6 +1,6 @@
 {
-  "name": "ASTRA WORLD",
-  "short_name": "ASTRA",
+  "name": "ASTRA WORLD — Oman Travel Assistant",
+  "short_name": "ASTRA WORLD",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#030807",
