@@ -3829,22 +3829,50 @@ const _go=go;go=function(p,a){if(p==='planner'){_go('chat');chTab('plan');return
  const ms=document.getElementById('astraMemoryStatus');if(ms)ms.textContent=awGet('astra_world_memory_enabled',false)?'الذاكرة مفعّلة على هذا الجهاز.':'الذاكرة متوقفة افتراضياً.';
  const vs=document.getElementById('astraWorldVoiceState');if(vs)vs.textContent=awGet(voiceKey,false)?'الرد الصوتي التلقائي مفعّل.':'الرد الصوتي التلقائي متوقف.';
  // Nearby real-world amenities from OpenStreetMap Overpass. Results are clearly attributed and may be incomplete.
- window.astraWorldMyLocation=async function(){if(!navigator.geolocation)return toast('المتصفح لا يدعم تحديد الموقع.');navigator.geolocation.getCurrentPosition(p=>{const ll=[p.coords.latitude,p.coords.longitude];if(mapObj){mapObj.setView(ll,16);if(window.astraWorldUserMarker)mapObj.removeLayer(window.astraWorldUserMarker);window.astraWorldUserMarker=L.circleMarker(ll,{radius:9,color:'#fff',weight:3,fillColor:'#1686ff',fillOpacity:1}).addTo(mapObj).bindPopup('موقعك الحالي');}toast('تم تحديد موقعك على الخريطة.');},e=>toast(e.code===1?'اسمح للموقع من إعدادات المتصفح.':'تعذّر تحديد موقعك حالياً.'),{enableHighAccuracy:true,timeout:15000,maximumAge:10000});};
+ async function awLocate(){
+  if(!navigator.geolocation)throw new Error('هذا المتصفح لا يدعم تحديد الموقع.');
+  const ask=(opts)=>new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,e=>reject(e),opts));
+  try{return await ask({enableHighAccuracy:false,timeout:12000,maximumAge:120000});}
+  catch(e){if(e&&e.code===1)throw new Error('إذن الموقع مرفوض. افتح إعدادات الموقع بجانب عنوان الموقع واختر سماح، ثم حدّث الصفحة.');
+   try{return await ask({enableHighAccuracy:true,timeout:20000,maximumAge:0});}
+   catch(e2){if(e2&&e2.code===1)throw new Error('إذن الموقع مرفوض. اسمح للموقع من إعدادات المتصفح.');
+    if(e2&&e2.code===2)throw new Error('تعذّر تحديد الموقع. تأكد من تشغيل خدمات الموقع والاتصال بالإنترنت.');
+    throw new Error('تحديد الموقع استغرق وقتاً طويلاً. جرّب قرب نافذة أو فعّل GPS ثم أعد المحاولة.');}
+  }
+ }
+ window.astraWorldMyLocation=async function(){
+  try{const p=await awLocate(),ll=[p.coords.latitude,p.coords.longitude];
+   if(!Number.isFinite(ll[0])||!Number.isFinite(ll[1]))throw new Error('الإحداثيات المستلمة غير صالحة.');
+   window.astraWorldLastPosition={lat:ll[0],lon:ll[1],accuracy:p.coords.accuracy};
+   if(mapObj){mapObj.setView(ll,16);if(window.astraWorldUserMarker)mapObj.removeLayer(window.astraWorldUserMarker);window.astraWorldUserMarker=L.circleMarker(ll,{radius:9,color:'#fff',weight:3,fillColor:'#1686ff',fillOpacity:1}).addTo(mapObj).bindPopup('موقعك الحالي · دقة GPS نحو '+Math.round(p.coords.accuracy)+' م');}
+   toast('تم تحديد موقعك · دقة تقريبية '+Math.round(p.coords.accuracy)+' متر');
+  }catch(e){console.warn('[ASTRA GPS]',e);toast(e.message||'تعذّر تحديد موقعك.');}
+ };
  window.astraWorldNearby=async function(category='all'){
-  const out=document.getElementById('astraWorldNearbyResults');if(!navigator.geolocation)return toast('المتصفح لا يدعم تحديد الموقع.');if(out)out.innerHTML='جارٍ تحديد موقعك والبحث عن الأماكن القريبة…';
-  navigator.geolocation.getCurrentPosition(async pos=>{try{
-   const lat=pos.coords.latitude,lon=pos.coords.longitude,r=3500;
-   const types={all:'restaurant|fuel|parking|bus_station|bus_stop|hospital|clinic|pharmacy|cafe|toilets',restaurant:'restaurant|fast_food',fuel:'fuel',parking:'parking',hospital:'hospital|clinic',pharmacy:'pharmacy',cafe:'cafe',toilets:'toilets'};
-   const selected=(types[category]||types.all).split('|');const rx=selected.join('|');
-   const q=`[out:json][timeout:25];(node(around:${r},${lat},${lon})[amenity~"^(${rx})$"];way(around:${r},${lat},${lon})[amenity~"^(${rx})$"];relation(around:${r},${lat},${lon})[amenity~"^(${rx})$"];);out center tags 60;`;
-   const res=await fetch('https://overpass-api.de/api/interpreter?data='+encodeURIComponent(q),{signal:AbortSignal.timeout(28000)});if(!res.ok)throw new Error('OSM '+res.status);const j=await res.json();
-   const labels={fuel:'محطة وقود',restaurant:'مطعم',fast_food:'مطعم وجبات سريعة',parking:'موقف سيارات',bus_station:'محطة حافلات',bus_stop:'موقف حافلات',hospital:'مستشفى',clinic:'عيادة',pharmacy:'صيدلية',cafe:'مقهى',toilets:'دورات مياه'};
-   awNearby=(j.elements||[]).map(x=>({id:x.id,lat:x.lat??x.center?.lat,lon:x.lon??x.center?.lon,name:x.tags?.name||x.tags?.brand||labels[x.tags?.amenity]||'مكان قريب',type:x.tags?.amenity})).filter(x=>Number.isFinite(x.lat)&&Number.isFinite(x.lon));
-   if(!awNearby.length){if(out)out.innerHTML='<small>لم نعثر على أماكن من هذا التصنيف مسجلة في OpenStreetMap ضمن 3.5 كم. جرّب تصنيفاً آخر أو وسّع البحث.</small>';return;}
-   const dist=(x)=>6371000*2*Math.asin(Math.sqrt(Math.sin((x.lat-lat)*Math.PI/360)**2+Math.cos(lat*Math.PI/180)*Math.cos(x.lat*Math.PI/180)*Math.sin((x.lon-lon)*Math.PI/360)**2));awNearby.sort((a,b)=>dist(a)-dist(b));
-   if(mapObj&&window.L){awNearbyLayers.forEach(x=>{try{mapObj.removeLayer(x)}catch(e){}});awNearbyLayers=[];awNearby.forEach(x=>{const m=L.marker([x.lat,x.lon]).addTo(mapObj).bindPopup(awEsc(x.name)+'<br><small>OpenStreetMap</small>');awNearbyLayers.push(m)});mapObj.setView([lat,lon],14);}
-   if(out)out.innerHTML='<div class="aw-small">'+awNearby.length+' نتيجة · بيانات OpenStreetMap وقد لا تشمل كل الأماكن</div>'+awNearby.slice(0,25).map((x,i)=>`<div class="aw-near-row"><div><b>${awEsc(x.name)}</b><br><small class="aw-small">${labels[x.type]||'خدمة'} · ${Math.round(dist(x))<1000?Math.round(dist(x))+' م':(dist(x)/1000).toFixed(1)+' كم'}</small></div><button onclick="astraWorldSelectNearby(${i})">عرض على الخريطة</button></div>`).join('');
-  }catch(e){console.warn('[ASTRA nearby]',e);if(out)out.innerHTML='<small>تعذّر تحميل الأماكن القريبة حالياً. جرّب بعد دقيقة؛ خدمة OpenStreetMap قد تكون مزدحمة.</small>'; }},e=>{if(out)out.innerHTML='<small>اسمح للموقع من المتصفح ثم أعد المحاولة.</small>';},{enableHighAccuracy:true,timeout:15000,maximumAge:60000});
+  const out=document.getElementById('astraWorldNearbyResults');
+  if(out)out.innerHTML='<b>1/2</b> جارٍ تحديد موقعك عبر GPS…';
+  let p;try{p=await awLocate();}catch(e){if(out)out.innerHTML='<b>تعذّر تحديد الموقع</b><br>'+awEsc(e.message)+'<br><small>بعد السماح بالموقع، اضغط التصنيف مرة أخرى.</small>';toast(e.message||'تعذّر تحديد موقعك.');return;}
+  try{
+   const lat=p.coords.latitude,lon=p.coords.longitude,r=5000;
+   const types={all:'restaurant|fuel|parking|bus_station|bus_stop|hospital|clinic|pharmacy|cafe|toilets|attraction|museum|viewpoint',restaurant:'restaurant|fast_food',fuel:'fuel',parking:'parking',hospital:'hospital|clinic',pharmacy:'pharmacy',cafe:'cafe',toilets:'toilets',attraction:'attraction|museum|viewpoint'};
+   const selected=(types[category]||types.all).split('|'),rx=selected.join('|');
+   const q=`[out:json][timeout:25];(node(around:${r},${lat},${lon})[amenity~"^(${rx})$"];way(around:${r},${lat},${lon})[amenity~"^(${rx})$"];relation(around:${r},${lat},${lon})[amenity~"^(${rx})$"];node(around:${r},${lat},${lon})[tourism~"^(attraction|museum|viewpoint)$"];way(around:${r},${lat},${lon})[tourism~"^(attraction|museum|viewpoint)$"];);out center tags 80;`;
+   const endpoints=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
+   let j=null,source='',lastError=null;
+   for(let n=0;n<endpoints.length;n++){
+    if(out)out.innerHTML='<b>2/2</b> جارٍ البحث في OpenStreetMap عبر Overpass العام…<br><small>الخادم '+(n+1)+' من '+endpoints.length+'</small>';
+    try{const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),28000);const res=await fetch(endpoints[n]+'?data='+encodeURIComponent(q),{signal:ctl.signal});clearTimeout(timer);if(!res.ok)throw new Error('HTTP '+res.status);j=await res.json();source=endpoints[n];break;}catch(err){lastError=err;console.warn('[ASTRA Overpass fallback]',endpoints[n],err);}
+   }
+   if(!j)throw new Error('تعذّر الوصول إلى خوادم Overpass العامة الثلاثة. '+(lastError?.message||''));
+   const labels={fuel:'محطة وقود',restaurant:'مطعم',fast_food:'مطعم وجبات سريعة',parking:'موقف سيارات',bus_station:'محطة حافلات',bus_stop:'موقف حافلات',hospital:'مستشفى',clinic:'عيادة',pharmacy:'صيدلية',cafe:'مقهى',toilets:'دورات مياه',attraction:'معلم سياحي',museum:'متحف',viewpoint:'مطل'};
+   awNearby=(j.elements||[]).map(x=>({id:x.id,lat:x.lat??x.center?.lat,lon:x.lon??x.center?.lon,name:x.tags?.name||x.tags?.brand||labels[x.tags?.amenity]||labels[x.tags?.tourism]||'مكان غير مسمى',type:x.tags?.amenity||x.tags?.tourism})).filter(x=>Number.isFinite(x.lat)&&Number.isFinite(x.lon));
+   const key=x=>x.id+':'+x.lat+':'+x.lon;awNearby=awNearby.filter((x,i,a)=>a.findIndex(y=>key(y)===key(x))===i);
+   const dist=x=>6371000*2*Math.asin(Math.sqrt(Math.sin((x.lat-lat)*Math.PI/360)**2+Math.cos(lat*Math.PI/180)*Math.cos(x.lat*Math.PI/180)*Math.sin((x.lon-lon)*Math.PI/360)**2));
+   awNearby.sort((a,b)=>dist(a)-dist(b));
+   if(mapObj&&window.L){awNearbyLayers.forEach(x=>{try{mapObj.removeLayer(x)}catch(e){}});awNearbyLayers=[];awNearby.forEach(x=>{const m=L.marker([x.lat,x.lon]).addTo(mapObj).bindPopup(awEsc(x.name)+'<br><small>OpenStreetMap · Overpass</small>');awNearbyLayers.push(m)});mapObj.setView([lat,lon],14);}
+   if(!awNearby.length){if(out)out.innerHTML='<b>تم الاتصال بـ Overpass بنجاح</b><br>لم نجد أماكن مسجلة لهذا التصنيف ضمن 5 كم. قد تكون بيانات OpenStreetMap ناقصة في منطقتك.';return;}
+   if(out)out.innerHTML='<div class="aw-small">'+awNearby.length+' نتيجة · المصدر: OpenStreetMap عبر Overpass العام · '+awEsc(new URL(source).hostname)+' · نطاق البحث 5 كم</div>'+awNearby.slice(0,35).map((x,i)=>`<div class="aw-near-row"><div><b>${awEsc(x.name)}</b><br><small class="aw-small">${labels[x.type]||'مكان'} · ${Math.round(dist(x))<1000?Math.round(dist(x))+' م':(dist(x)/1000).toFixed(1)+' كم'}</small></div><button onclick="astraWorldSelectNearby(${i})">عرض على الخريطة</button></div>`).join('');
+  }catch(e){console.warn('[ASTRA nearby]',e);if(out)out.innerHTML='<b>تعذّر البحث عن الأماكن</b><br>'+awEsc(e.message||'خدمة Overpass غير متاحة حالياً.')+'<br><small>لم يتم اعتبار فشل الاتصال دليلاً على عدم وجود أماكن.</small>';}
  };
  window.astraWorldSelectNearby=function(i){const x=awNearby[i];if(!x||!mapObj)return;mapObj.setView([x.lat,x.lon],17);const m=awNearbyLayers[i];if(m)m.openPopup();};
  // Recalculate an existing route through a selected nearby stop. Uses the existing ASTRA route API.
