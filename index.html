@@ -1146,7 +1146,7 @@ setTimeout(function(){if(!W._spd){W._spOK=1;if(typeof W._spDone==='function'){tr
   <input id="ms" placeholder="ابحث مباشرة…" oninput="mapSearch()" style="margin-top:10px"><div class="mres glass" id="mres" style="display:none"></div>
   <select id="mcat" onchange="mapFilter()" style="margin-top:8px"></select>
   <div class="aw-map-tools" id="astraWorldMapTools"><div class="aw-map-head"><b>اكتشف الأماكن حولك</b><button onclick="astraWorldMyLocation()" class="aw-loc">◎ موقعي</button></div>
-   <div class="aw-map-cats"><button onclick="astraWorldNearby('all')">✨ الكل</button><button onclick="astraWorldNearby('restaurant')">🍽️ مطاعم</button><button onclick="astraWorldNearby('fuel')">⛽ وقود</button><button onclick="astraWorldNearby('parking')">🅿️ مواقف</button><button onclick="astraWorldNearby('hospital')">🏥 مستشفيات</button><button onclick="astraWorldNearby('pharmacy')">💊 صيدليات</button><button onclick="astraWorldNearby('cafe')">☕ مقاهي</button><button onclick="astraWorldNearby('toilets')">🚻 دورات مياه</button></div>
+   <div class="aw-map-cats"><button onclick="astraWorldNearby('all')">✨ الكل</button><button onclick="astraWorldNearby('restaurant')">🍽️ مطاعم</button><button onclick="astraWorldNearby('fuel')">⛽ وقود</button><button onclick="astraWorldNearby('parking')">🅿️ مواقف</button><button onclick="astraWorldNearby('hospital')">🏥 مستشفيات</button><button onclick="astraWorldNearby('pharmacy')">💊 صيدليات</button><button onclick="astraWorldNearby('cafe')">☕ مقاهي</button><button onclick="astraWorldNearby('toilets')">🚻 دورات مياه</button><button onclick="astraWorldNearby('tourist')">🏞️ معالم سياحية</button></div>
    <div class="aw-map-actions"><button onclick="astraWorldNearby('all')">ابحث حول موقعي</button><button onclick="astraWorldWeather()">🌦️ الطقس</button></div>
    <div id="astraWorldNearbyResults" class="aw-near-results"></div><div id="astraWorldWeatherResults"></div></div>
   <div id="mapbox"><div id="mapc"></div></div>
@@ -3922,6 +3922,144 @@ const _go=go;go=function(p,a){if(p==='planner'){_go('chat');chTab('plan');return
 })();
 
 spImp();
+})();
+</script>
+
+
+<script>
+/* ASTRA WORLD V1.3 reliability patch */
+(function(){
+ 'use strict';
+ const safeText=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ function positionError(e){
+  if(!e)return 'تعذّر تحديد الموقع.';
+  if(e.code===1)return 'إذن الموقع مرفوض. من إعدادات الموقع بجانب عنوان الصفحة، اسمح للموقع ثم حدّث الصفحة.';
+  if(e.code===2)return 'الجهاز لم يتمكن من تحديد الموقع. فعّل GPS وتأكد من أن خدمات الموقع مفعّلة.';
+  if(e.code===3)return 'تحديد الموقع استغرق وقتاً طويلاً. انتقل لمكان مفتوح وحاول مرة أخرى.';
+  return e.message||'تعذّر تحديد الموقع.';
+ }
+ window.astraGetPosition=function(){
+  return new Promise((resolve,reject)=>{
+   if(!navigator.geolocation)return reject(new Error('المتصفح لا يدعم تحديد الموقع.'));
+   if(!window.isSecureContext)return reject(new Error('يلزم فتح ASTRA عبر HTTPS لتحديد الموقع.'));
+   navigator.geolocation.getCurrentPosition(resolve,err=>{
+    if(err.code===1){reject(new Error(positionError(err)));return;}
+    navigator.geolocation.getCurrentPosition(resolve,err2=>reject(new Error(positionError(err2))),{enableHighAccuracy:false,timeout:20000,maximumAge:120000});
+   },{enableHighAccuracy:true,timeout:12000,maximumAge:10000});
+  });
+ };
+ window.astraWorldMyLocation=async function(){
+  try{
+   const p=await window.astraGetPosition(),ll=[p.coords.latitude,p.coords.longitude];
+   if(!Number.isFinite(ll[0])||!Number.isFinite(ll[1]))throw new Error('إحداثيات الموقع غير صالحة.');
+   if(mapObj){mapObj.setView(ll,16);if(window.astraWorldUserMarker)mapObj.removeLayer(window.astraWorldUserMarker);window.astraWorldUserMarker=L.circleMarker(ll,{radius:9,color:'#fff',weight:3,fillColor:'#1686ff',fillOpacity:1}).addTo(mapObj).bindPopup('موقعك الحالي · دقة GPS ±'+Math.round(p.coords.accuracy)+' م');}
+   const out=document.getElementById('astraWorldNearbyResults');
+   if(out)out.innerHTML='<small>تم تحديد موقعك. دقة GPS التقريبية: ±'+Math.round(p.coords.accuracy)+' متر.</small>';
+   if(typeof toast==='function')toast('تم تحديد موقعك. دقة GPS ±'+Math.round(p.coords.accuracy)+' متر.');
+  }catch(e){console.warn('[ASTRA GPS]',e);if(typeof toast==='function')toast(e.message||'تعذّر تحديد الموقع.');}
+ };
+ const categories={
+  all:{filter:'["amenity"~"restaurant|fast_food|fuel|parking|bus_station|bus_stop|hospital|clinic|pharmacy|cafe|toilets|bank|atm|police|fire_station"]',extra:'["tourism"~"attraction|museum|viewpoint|hotel|guest_house|museum|information"]'},
+  restaurant:{filter:'["amenity"~"restaurant|fast_food"]'},
+  fuel:{filter:'["amenity"="fuel"]'},
+  parking:{filter:'["amenity"="parking"]'},
+  hospital:{filter:'["amenity"~"hospital|clinic"]'},
+  pharmacy:{filter:'["amenity"="pharmacy"]'},
+  cafe:{filter:'["amenity"="cafe"]'},
+  toilets:{filter:'["amenity"="toilets"]'},
+  tourist:{filter:'["tourism"~"attraction|museum|viewpoint|information"]'}
+ };
+ const typeNames={restaurant:'مطعم',fast_food:'مطعم وجبات سريعة',fuel:'محطة وقود',parking:'موقف سيارات',bus_station:'محطة حافلات',bus_stop:'موقف حافلات',hospital:'مستشفى',clinic:'عيادة',pharmacy:'صيدلية',cafe:'مقهى',toilets:'دورات مياه',bank:'بنك',atm:'صراف آلي',police:'مركز شرطة',fire_station:'الدفاع المدني',attraction:'معلم سياحي',museum:'متحف',viewpoint:'مطل',hotel:'فندق',guest_house:'بيت ضيافة',information:'مركز معلومات'};
+ let nearbyData=[],nearbyLayers=[];
+ function distance(a,b){const r=Math.PI/180,d1=(b.lat-a.lat)*r,d2=(b.lon-a.lon)*r,x=Math.sin(d1/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(d2/2)**2;return 6371000*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));}
+ window.astraWorldNearby=async function(category='all'){
+  const out=document.getElementById('astraWorldNearbyResults');
+  if(out)out.innerHTML='<small>جارٍ تحديد موقعك ثم البحث عن الأماكن المسجلة حولك…</small>';
+  let pos;
+  try{pos=await window.astraGetPosition();}catch(e){if(out)out.innerHTML='<small>'+safeText(e.message)+'</small>';if(typeof toast==='function')toast(e.message);return;}
+  const lat=pos.coords.latitude,lon=pos.coords.longitude,selected=categories[category]||categories.all,radius=5000;
+  if(out)out.innerHTML='<small>تم تحديد الموقع بدقة ±'+Math.round(pos.coords.accuracy)+' م. جارٍ البحث ضمن '+(radius/1000)+' كم…</small>';
+  const clauses=[];
+  if(selected.filter)clauses.push('node(around:'+radius+','+lat+','+lon+')'+selected.filter+';way(around:'+radius+','+lat+','+lon+')'+selected.filter+';relation(around:'+radius+','+lat+','+lon+')'+selected.filter+';');
+  if(selected.extra)clauses.push('node(around:'+radius+','+lat+','+lon+')'+selected.extra+';way(around:'+radius+','+lat+','+lon+')'+selected.extra+';relation(around:'+radius+','+lat+','+lon+')'+selected.extra+';');
+  const query='[out:json][timeout:25];('+clauses.join('')+');out center tags 100;';
+  const servers=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.nchc.org.tw/api/interpreter'];
+  let result=null,lastError=null;
+  for(const endpoint of servers){
+   try{
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),24000);
+    let response;try{response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json'},body:'data='+encodeURIComponent(query),signal:controller.signal});}finally{clearTimeout(timer);}
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const data=await response.json();if(!Array.isArray(data.elements))throw new Error('استجابة بيانات غير مكتملة');
+    result=data;break;
+   }catch(e){lastError=e;console.warn('[ASTRA Overpass source failed]',endpoint,e);}
+  }
+  if(!result){if(out)out.innerHTML='<small>لم نتمكن من الوصول إلى مصادر بيانات الأماكن حالياً. تأكد من الإنترنت وحاول لاحقاً. لم نعتبر ذلك دليلاً على عدم وجود أماكن.</small>';return;}
+  const seen=new Set();
+  nearbyData=result.elements.map(x=>({id:x.type+'/'+x.id,lat:x.lat??x.center?.lat,lon:x.lon??x.center?.lon,tags:x.tags||{}})).filter(x=>Number.isFinite(x.lat)&&Number.isFinite(x.lon)).map(x=>{
+   const t=x.tags,typ=t.amenity||t.tourism||t.shop||t.leisure;
+   return {...x,name:t.name||t['name:ar']||t.brand||typeNames[typ]||'مكان مسجل في OpenStreetMap',type:typ};
+  }).filter(x=>{if(seen.has(x.id))return false;seen.add(x.id);return true;});
+  nearbyData.sort((a,b)=>distance({lat,lon},a)-distance({lat,lon},b));
+  if(mapObj&&window.L){
+   nearbyLayers.forEach(x=>{try{mapObj.removeLayer(x)}catch(e){}});nearbyLayers=[];
+   if(window.astraWorldUserMarker)try{mapObj.removeLayer(window.astraWorldUserMarker)}catch(e){}
+   window.astraWorldUserMarker=L.circleMarker([lat,lon],{radius:8,color:'#fff',weight:3,fillColor:'#1686ff',fillOpacity:1}).addTo(mapObj).bindPopup('موقعك الحالي');
+   nearbyData.forEach(x=>{const marker=L.marker([x.lat,x.lon]).addTo(mapObj).bindPopup(safeText(x.name)+'<br><small>المصدر: OpenStreetMap</small>');nearbyLayers.push(marker);});
+   mapObj.setView([lat,lon],14);
+  }
+  if(!nearbyData.length){if(out)out.innerHTML='<p>لم نجد أماكن مسجلة من هذا النوع ضمن 5 كم. قد تكون بيانات الخريطة ناقصة في هذه المنطقة؛ جرّب تصنيفاً آخر أو وسّع نطاق البحث.</p>';return;}
+  if(out)out.innerHTML='<div class="aw-small">'+nearbyData.length+' مكاناً مسجلاً · المصدر OpenStreetMap · قد تكون التغطية ناقصة</div>'+nearbyData.slice(0,30).map((x,i)=>{
+   const d=distance({lat,lon},x),dist=d<1000?Math.round(d)+' م':(d/1000).toFixed(1)+' كم';
+   return '<div class="aw-near-row"><div><b>'+safeText(x.name)+'</b><br><small>'+safeText(typeNames[x.type]||'مكان')+' · '+dist+'</small></div><div style="display:flex;gap:5px;flex-wrap:wrap"><button onclick="astraWorldSelectNearbyV13('+i+')">عرض</button></div></div>';
+  }).join('')+'<small class="aw-small">المسافات تقريبية بخط مستقيم وليست مسافة الطريق.</small>';
+ };
+ window.astraWorldSelectNearbyV13=function(i){const x=nearbyData[i];if(!x||!mapObj)return;mapObj.setView([x.lat,x.lon],17);const m=nearbyLayers[i];if(m)m.openPopup();};
+ // City-name matching: Arabic spelling variants and English aliases for Omani wilayats.
+ const oldLocations=window.astraRouteLocations;
+ function norm(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[\u064b-\u065f\u0670]/g,'').replace(/[أإآٱ]/g,'ا').replace(/[ىي]/g,'ي').replace(/ة/g,'ه').replace(/ئ/g,'ي').replace(/ـ/g,'').replace(/[\s\-_.،,؛;:!?؟()\[\]{}'"`]/g,'');}
+ const aliases=[
+  ['إزكي','ازكي','izki','izkī',22.93,57.77],['نزوى','نزوه','nizwa',22.933,57.531],
+  ['سمائل','سمايل','samail',23.30,57.98],['بدية','بديه','bidiyah','bidiya',22.45,58.82],
+  ['إبراء','ابراء','ibra',22.69,58.534],['بهلاء','بهلا','bahla',22.965,57.304],
+  ['مسقط','muscat',23.588,58.383],['صور','sur',22.567,59.529],['عبري','ibri',23.225,56.515]
+ ];
+ window.astraRouteLocations=function(text){
+  const q=norm(text),out=[];
+  if(typeof oldLocations==='function'){try{oldLocations(text).forEach(x=>out.push(x));}catch(e){}}
+  aliases.forEach(a=>a.slice(0,4).forEach(n=>{
+   const key=norm(n);if(key.length>2&&q.includes(key)&&!out.some(x=>norm(x.name)===norm(a[0])))out.push({name:a[0],lat:a[a.length-2],lng:a[a.length-1],id:'alias-'+key});
+  }));
+  return out.filter(x=>Number.isFinite(+x.lat)&&Number.isFinite(+x.lng));
+ };
+ const oldDetect=window.detectRouteRequest;
+ window.detectRouteRequest=function(text){
+  const places=window.astraRouteLocations(text),q=norm(text);
+  const hasConnector=/(من|الى|الي|بين|باتجاه|نحو|from|to)/.test(q);
+  const intent=/(مسار|طريق|ملاحه|ملاحيه|وجهني|دلني|ودني|وصلني|اروح|اذهب|امشي|اسلك|ارسم|سوي|خذني|ابغا|ابغى|اريد|navigate|directions|route|map|driving|walking)/.test(q);
+  if(places.length>=2&&(hasConnector||intent||q.length<55))return {from:places[0],to:places[1],source:'named'};
+  if(places.length===1&&intent)return {from:null,to:places[0],source:'current'};
+  if(typeof oldDetect==='function')return oldDetect(text);
+  return null;
+ };
+ // Nearby questions should open the map and search instead of being answered with generic AI guesses.
+ const priorSend=window.send;
+ window.send=async function(txt){
+  const val=String(txt??document.getElementById('cinp')?.value??'').trim(),q=norm(val);
+  const nearbyIntent=/(اماكنقريبه|اماكنقريب|الاماكنالقريبه|اماكنحولك|اماكنبالقرب|اقربالاماكن|اقرباماكن|اماكنقرب|حولموقعي|بالقربمني|يوجدبالقربمني|مطاعمقريبه|اقربمطاعم|محطاتوقودقريبه|اقربمحطاتالوقود|خدماتقريبه)/.test(q);
+  if(nearbyIntent){
+   const c=typeof curChat==='function'?curChat():null;
+   if(c){c.msgs.push({r:'u',raw:val},{r:'route-status',raw:'سأبحث عن الأماكن المسجلة حول موقعك وأعرض مصدر البيانات وتغطيتها.'});saveChats();renderChat();}
+   const inp=document.getElementById('cinp');if(inp)inp.value='';
+   if(typeof go==='function')go('map');
+   setTimeout(()=>window.astraWorldNearby('all'),250);
+   return;
+  }
+  if(typeof priorSend==='function')return priorSend(txt);
+ };
+ // Add a clear, source-aware status line; never imply a complete Google Maps-equivalent database.
+ const note=document.getElementById('astraMapDataNote');
+ if(note)note.textContent='الموقع الأزرق هو GPS جهازك. الأماكن المعروضة مسجلة في OpenStreetMap وقد تكون ناقصة؛ المسافات تقريبية بخط مستقيم. لا نعرض مكاناً على أنه موجود إذا لم يرد في البيانات.';
 })();
 </script>
 
